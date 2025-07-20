@@ -1,7 +1,14 @@
 # Byte-compiled / optimized / DLL files
+dataset/
+runs/
+weights/
 __pycache__/
 *.py[cod]
 *$py.class
+
+# Inside loss_mods/
+*.pt
+*.log
 
 # C extensions
 *.so
