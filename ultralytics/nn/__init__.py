@@ -14,6 +14,9 @@ from .tasks import (
     yaml_model_load,
 )
 
+from .modules_caf import CAFBlock
+from ultralytics.nn.modules_caf import CAFBlock  # custom neck block
+
 __all__ = (
     "attempt_load_one_weight",
     "attempt_load_weights",
@@ -26,4 +29,5 @@ __all__ = (
     "SegmentationModel",
     "ClassificationModel",
     "BaseModel",
+    "CAFBlock",
 )
