@@ -191,16 +191,26 @@ class KeypointLoss(nn.Module):
         return (kpt_loss_factor.view(-1, 1) * ((1 - torch.exp(-e)) * kpt_mask)).mean()
 
 
-class v8DetectionLoss:
+class v8DetectionLoss(nn.Module):
     """Criterion class for computing training losses for YOLOv8 object detection."""
 
     def __init__(self, model, tal_topk: int = 10):  # model must be de-paralleled
         """Initialize v8DetectionLoss with model parameters and task-aligned assignment settings."""
-        device = next(model.parameters()).device  # get model device
+        super().__init__()  # ← add this
+        device = next(model.parameters()).device
+        # device = next(model.parameters()).device  # get model device
         h = model.args  # hyperparameters
 
         m = model.model[-1]  # Detect() module
         self.bce = nn.BCEWithLogitsLoss(reduction="none")
+        # Risk-aware classification weights
+        cls_weights = torch.tensor(
+            [4.47, 5.0, 3.0, 2.19, 2.57, 2.34, 4.96],
+            device=device
+        ).view(1, 1, -1)
+        self.register_buffer("cls_w", cls_weights)
+        print("✅ Using Risk-Aware Loss", flush=True)
+
         self.hyp = h
         self.stride = m.stride  # model strides
         self.nc = m.nc  # number of classes
@@ -281,7 +291,9 @@ class v8DetectionLoss:
 
         # Cls loss
         # loss[1] = self.varifocal_loss(pred_scores, target_scores, target_labels) / target_scores_sum  # VFL way
-        loss[1] = self.bce(pred_scores, target_scores.to(dtype)).sum() / target_scores_sum  # BCE
+        # loss[1] = self.bce(pred_scores, target_scores.to(dtype)).sum() / target_scores_sum  # BCE
+        cls_loss = self.bce(pred_scores, target_scores.to(dtype)) * self.cls_w.to(dtype)
+        loss[1] = cls_loss.sum() / target_scores_sum
 
         # Bbox loss
         if fg_mask.sum():
