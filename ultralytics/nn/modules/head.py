@@ -226,6 +226,75 @@ class Detect(nn.Module):
         return torch.cat([boxes[i, index // nc], scores[..., None], (index % nc)[..., None].float()], dim=-1)
 
 
+class HazardDetect(Detect):
+    """
+    YOLO detection head with auxiliary hazard classification for medical waste.
+
+    This extends the standard Detect head to include a binary hazard classifier
+    that helps improve detection of critical classes (medical waste).
+
+    Attributes:
+        medical_idx (int): Index of medical class in dataset
+        hazard_head (nn.Module): Binary classification head for hazard detection
+        lambda_hz (float): Weight for hazard loss
+    """
+
+    def __init__(self, nc=80, medical_idx=1, lambda_hz=0.5, ch=()):
+        """Initialize YOLO detection head with hazard classification."""
+        super().__init__(nc, ch)
+        self.medical_idx = medical_idx
+        self.lambda_hz = lambda_hz
+
+        # Calculate feature dimension from channels
+        # We'll use pooled features from each detection level
+        c_hazard = sum(ch)  # Total channels from all levels
+
+        # Binary hazard classification head
+        self.hazard_head = nn.Sequential(
+            nn.Linear(c_hazard, 512),
+            nn.ReLU(inplace=True),
+            nn.Dropout(0.2),
+            nn.Linear(512, 256),
+            nn.ReLU(inplace=True),
+            nn.Dropout(0.1),
+            nn.Linear(256, 1)  # Binary classification
+        )
+
+        # Initialize hazard head
+        for m in self.hazard_head.modules():
+            if isinstance(m, nn.Linear):
+                nn.init.xavier_uniform_(m.weight)
+                nn.init.constant_(m.bias, 0)
+
+    def forward(self, x):
+        """Forward pass with hazard classification."""
+        # Standard detection forward
+        for i in range(self.nl):
+            x[i] = torch.cat((self.cv2[i](x[i]), self.cv3[i](x[i])), 1)
+
+        # Extract features for hazard classification if training
+        if self.training:
+            # Pool features from each level and concatenate
+            hazard_features = []
+            for feat in x:
+                # feat shape: (bs, no, h, w) where no = nc + reg_max*4
+                # Extract only the feature part before detection head output
+                pooled = F.adaptive_avg_pool2d(feat, 1).flatten(1)
+                hazard_features.append(pooled)
+
+            # Concatenate pooled features
+            hazard_feat = torch.cat(hazard_features, dim=1)
+
+            # Get hazard predictions
+            hazard_logits = self.hazard_head(hazard_feat)
+
+            # Return both detection and hazard outputs
+            return x, hazard_logits
+
+        # Inference mode - standard detection only
+        y = self._inference(x)
+        return y if self.export else (y, x)
+
 class Segment(Detect):
     """
     YOLO Segment head for segmentation models.

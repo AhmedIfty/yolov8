@@ -80,6 +80,7 @@ from .head import (
     OBB,
     Classify,
     Detect,
+    HazardDetect,  # Add this line
     LRPCHead,
     Pose,
     RTDETRDecoder,
@@ -142,6 +143,7 @@ __all__ = (
     "BottleneckCSP",
     "Proto",
     "Detect",
+    "HazardDetect",
     "Segment",
     "Pose",
     "Classify",
