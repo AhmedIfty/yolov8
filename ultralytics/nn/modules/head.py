@@ -1,3 +1,5 @@
+# ultralytics/nn/modules/head.py
+
 # Ultralytics 🚀 AGPL-3.0 License - https://ultralytics.com/license
 """Model head modules."""
 
@@ -226,74 +228,308 @@ class Detect(nn.Module):
         return torch.cat([boxes[i, index // nc], scores[..., None], (index % nc)[..., None].float()], dim=-1)
 
 
-class HazardDetect(Detect):
-    """
-    YOLO detection head with auxiliary hazard classification for medical waste.
+# In ultralytics/nn/modules/head.py
 
-    This extends the standard Detect head to include a binary hazard classifier
-    that helps improve detection of critical classes (medical waste).
+class HazardDetect(nn.Module):
+    """YOLOv8 Hazard Detection head for multi-task learning."""
+    is_hazard_head = True  # The unambiguous boolean flag
 
-    Attributes:
-        medical_idx (int): Index of medical class in dataset
-        hazard_head (nn.Module): Binary classification head for hazard detection
-        lambda_hz (float): Weight for hazard loss
-    """
+    def __init__(self, nc=80, ch=()):
+        super().__init__()
+        self.nc = nc
+        self.nl = len(ch)
+        self.reg_max = 16
+        self.no = nc + self.reg_max * 4
 
-    def __init__(self, nc=80, medical_idx=1, lambda_hz=0.5, ch=()):
-        """Initialize YOLO detection head with hazard classification."""
-        super().__init__(nc, ch)
-        self.medical_idx = medical_idx
-        self.lambda_hz = lambda_hz
+        # === START OF THE FIX ===
 
-        # Calculate feature dimension from channels
-        # We'll use pooled features from each detection level
-        c_hazard = sum(ch)  # Total channels from all levels
+        # 1. Properly register 'anchors' and 'stride' as buffers.
+        #    They will be initialized as empty and populated later by the main model.
+        self.register_buffer('anchors', torch.empty(0))
+        self.register_buffer('stride', torch.zeros(self.nl))
 
-        # Binary hazard classification head
+        # === END OF THE FIX ===
+
+        c2, c3 = max((16, ch[0] // 4, self.reg_max * 4)), max(ch[0], self.nc)
+        self.cv2 = nn.ModuleList(
+            nn.Sequential(Conv(x, c2, 3), Conv(c2, c2, 3), nn.Conv2d(c2, 4 * self.reg_max, 1)) for x in ch)
+        self.cv3 = nn.ModuleList(nn.Sequential(Conv(x, c3, 3), Conv(c3, c3, 3), nn.Conv2d(c3, self.nc, 1)) for x in ch)
+        self.dfl = DFL(self.reg_max) if self.reg_max > 1 else nn.Identity()
+
+        in_channels = sum(ch)
         self.hazard_head = nn.Sequential(
-            nn.Linear(c_hazard, 512),
-            nn.ReLU(inplace=True),
-            nn.Dropout(0.2),
-            nn.Linear(512, 256),
-            nn.ReLU(inplace=True),
+            nn.AdaptiveAvgPool2d((1, 1)),
+            nn.Flatten(),
+            nn.Linear(in_channels, 512),
+            nn.ReLU(),
             nn.Dropout(0.1),
-            nn.Linear(256, 1)  # Binary classification
+            nn.Linear(512, 1)
         )
 
-        # Initialize hazard head
-        for m in self.hazard_head.modules():
-            if isinstance(m, nn.Linear):
-                nn.init.xavier_uniform_(m.weight)
-                nn.init.constant_(m.bias, 0)
-
     def forward(self, x):
-        """Forward pass with hazard classification."""
-        # Standard detection forward
+        """
+        Forward pass of the HazardDetect head, with on-the-fly anchor generation for inference.
+        """
+        # 1. Prepare and calculate hazard logits
+        shape = x[0].shape[-2:]
+        hazard_features = torch.cat([F.interpolate(xi, size=shape, mode='bilinear', align_corners=False) for xi in x],
+                                    1)
+        hazard_logits = self.hazard_head(hazard_features)
+
+        # 2. Prepare detection features
         for i in range(self.nl):
             x[i] = torch.cat((self.cv2[i](x[i]), self.cv3[i](x[i])), 1)
 
-        # Extract features for hazard classification if training
+        # 3. Handle different outputs for training and inference
         if self.training:
-            # Pool features from each level and concatenate
-            hazard_features = []
-            for feat in x:
-                # feat shape: (bs, no, h, w) where no = nc + reg_max*4
-                # Extract only the feature part before detection head output
-                pooled = F.adaptive_avg_pool2d(feat, 1).flatten(1)
-                hazard_features.append(pooled)
-
-            # Concatenate pooled features
-            hazard_feat = torch.cat(hazard_features, dim=1)
-
-            # Get hazard predictions
-            hazard_logits = self.hazard_head(hazard_feat)
-
-            # Return both detection and hazard outputs
             return x, hazard_logits
+        else:
+            # --- INFERENCE/VALIDATION LOGIC ---
+            shape = x[0].shape  # BCHW
 
-        # Inference mode - standard detection only
-        y = self._inference(x)
-        return y if self.export else (y, x)
+            # === START OF THE FIX ===
+            # Generate anchors and strides dynamically from the feature maps (x)
+            anchors, strides = (y.transpose(0, 1) for y in make_anchors(x, self.stride, 0.5))
+            # === END OF THE FIX ===
+
+            box, cls = torch.cat([xi.view(shape[0], self.no, -1) for xi in x], 2).split((self.reg_max * 4, self.nc), 1)
+
+            # Use the dynamically generated anchors and strides for decoding
+            dbox = dist2bbox(self.dfl(box), anchors.unsqueeze(0), xywh=True, dim=1) * strides
+            y = torch.cat((dbox, cls.sigmoid()), 1)
+
+            return y, hazard_logits
+
+    # def forward(self, x):
+    #     """
+    #     Forward pass of the HazardDetect head. This method now returns raw outputs for both training and inference.
+    #     """
+    #     # --- This is the new, simplified forward pass logic ---
+    #
+    #     # 1. Prepare and calculate hazard logits
+    #     shape = x[0].shape[-2:]
+    #     hazard_features = torch.cat([F.interpolate(xi, size=shape, mode='bilinear', align_corners=False) for xi in x],
+    #                                 1)
+    #     hazard_logits = self.hazard_head(hazard_features)
+    #
+    #     # 2. Prepare detection features
+    #     for i in range(self.nl):
+    #         x[i] = torch.cat((self.cv2[i](x[i]), self.cv3[i](x[i])), 1)
+    #
+    #     # 3. Always return the raw detection features and hazard logits as a tuple
+    #     return x, hazard_logits
+
+    def bias_init(self):
+        """Initialize biases."""
+        # This function remains unchanged
+        for a, b, s in zip(self.cv2, self.cv3, self.stride):
+            a[-1].bias.data[:] = 1.0
+            b[-1].bias.data[: self.nc] = math.log(5 / self.nc / (640 / s) ** 2)
+
+
+
+# class HazardDetect(nn.Module):
+#     """YOLOv8 Hazard Detection head for multi-task learning."""
+#     # This attribute signals to the trainer that this is a custom head
+#     # hazard_head = True
+#     is_hazard_head = True
+#
+#     def __init__(self, nc=80, ch=()):
+#         """
+#         Initializes the HazardDetect head.
+#
+#         Args:
+#             nc (int): Number of classes.
+#             ch (tuple): A tuple of input channels from the FPN.
+#         """
+#         super().__init__()
+#         self.nc = nc  # number of classes
+#         self.nl = len(ch)  # number of detection layers
+#         self.reg_max = 16  # DFL channels (must be divisible by 4)
+#         self.no = nc + self.reg_max * 4  # number of outputs per anchor
+#         self.stride = torch.zeros(self.nl)
+#
+#         c2, c3 = max((16, ch[0] // 4, self.reg_max * 4)), max(ch[0], self.nc)  # channels
+#         self.cv2 = nn.ModuleList(
+#             nn.Sequential(Conv(x, c2, 3), Conv(c2, c2, 3), nn.Conv2d(c2, 4 * self.reg_max, 1)) for x in ch)
+#         self.cv3 = nn.ModuleList(nn.Sequential(Conv(x, c3, 3), Conv(c3, c3, 3), nn.Conv2d(c3, self.nc, 1)) for x in ch)
+#         self.dfl = DFL(self.reg_max) if self.reg_max > 1 else nn.Identity()
+#
+#         # === START OF THE FIX ===
+#
+#         # 1. Calculate the total number of input channels dynamically from the 'ch' tuple.
+#         #    For your yolov8m model, sum(ch) will be 192 + 384 + 576 = 1152.
+#         in_channels = sum(ch)
+#
+#         # 2. Define the hazard_head with the correct layers to handle the shape mismatch.
+#         self.hazard_head = nn.Sequential(
+#             # Collapses spatial dimensions (height, width) to 1x1
+#             nn.AdaptiveAvgPool2d((1, 1)),
+#
+#             # Flattens the tensor from [batch, channels, 1, 1] to [batch, channels]
+#             nn.Flatten(),
+#
+#             # First linear layer now correctly takes `in_channels` as input
+#             nn.Linear(in_channels, 512),
+#             nn.ReLU(),
+#             nn.Dropout(0.1),
+#
+#             # Final linear layer outputs a single logit for hazard presence (binary classification)
+#             nn.Linear(512, 1)
+#         )
+#         # === END OF THE FIX ===
+#
+#     def forward(self, x):
+#         """
+#         Forward pass of the HazardDetect head with corrected feature map handling.
+#
+#         Args:
+#             x (list of torch.Tensor): A list of feature maps from the backbone [P3, P4, P5].
+#
+#         Returns:
+#             (tuple): A tuple containing detection outputs and hazard logits.
+#         """
+#
+#         # === START OF THE FIX ===
+#
+#         # 1. Prepare features for the hazard head.
+#         #    'x' is a list of feature maps, e.g., [small(80x80), medium(40x40), large(20x20)].
+#         #    We must upsample the smaller maps to match the size of the largest one before concatenation.
+#
+#         # Get the spatial size of the largest feature map (x[0]).
+#         shape = x[0].shape[-2:]  # (height, width), e.g., (80, 80)
+#
+#         # Upsample all feature maps to the same size and concatenate them.
+#         hazard_features = torch.cat([F.interpolate(xi, size=shape, mode='bilinear', align_corners=False) for xi in x],
+#                                     1)
+#
+#         # === END OF THE FIX ===
+#
+#         # 2. Pass the correctly combined features through the hazard head.
+#         hazard_logits = self.hazard_head(hazard_features)
+#
+#         # 3. Standard YOLOv8 detection forward pass (this part remains the same).
+#         for i in range(self.nl):
+#             x[i] = torch.cat((self.cv2[i](x[i]), self.cv3[i](x[i])), 1)
+#
+#         if self.training:
+#             return x, hazard_logits
+#
+#         # Inference mode
+#         box, cls = torch.cat([xi.view(x[0].shape[0], self.no, -1) for xi in x], 2).split((self.reg_max * 4, self.nc), 1)
+#         dbox = dist2bbox(self.dfl(box), self.anchors.unsqueeze(0), xywh=True, dim=1) * self.stride
+#         y = torch.cat((dbox, cls.sigmoid()), 1)
+#
+#         return y, hazard_logits
+#
+#     def bias_init(self):
+#         """Initialize biases."""
+#         # This function remains unchanged
+#         for a, b, s in zip(self.cv2, self.cv3, self.stride):
+#             a[-1].bias.data[:] = 1.0  # box
+#             b[-1].bias.data[: self.nc] = math.log(5 / self.nc / (640 / s) ** 2)  # cls (.01 objects per 640 pix)
+
+
+
+# class HazardDetect(Detect):
+#     """
+#     YOLO detection head with auxiliary hazard classification for medical waste.
+#
+#     This extends the standard Detect head to include a binary hazard classifier
+#     that helps improve detection of critical classes (medical waste).
+#     """
+#
+#     def __init__(self, nc=80, ch=()):
+#         """Initialize YOLO detection head with hazard classification."""
+#         super().__init__(nc, ch)
+#
+#         # Default values - will be overridden by trainer if needed
+#         self.medical_idx = 1
+#         self.lambda_hz = 0.5
+#
+#         # Calculate feature dimension from channels
+#         if ch:  # Only build hazard head if channels are provided
+#             c_hazard = sum(ch)  # Total channels from all levels
+#
+#             # Binary hazard classification head
+#             self.hazard_head = nn.Sequential(
+#                 nn.Linear(c_hazard, 512),
+#                 nn.ReLU(inplace=True),
+#                 nn.Dropout(0.2),
+#                 nn.Linear(512, 256),
+#                 nn.ReLU(inplace=True),
+#                 nn.Dropout(0.1),
+#                 nn.Linear(256, 1)  # Binary classification
+#             )
+#
+#             # Initialize hazard head
+#             for m in self.hazard_head.modules():
+#                 if isinstance(m, nn.Linear):
+#                     nn.init.xavier_uniform_(m.weight)
+#                     nn.init.constant_(m.bias, 0)
+#
+#     def forward(self, x):
+#         """Forward pass with hazard classification."""
+#         # Standard detection forward
+#         for i in range(self.nl):
+#             x[i] = torch.cat((self.cv2[i](x[i]), self.cv3[i](x[i])), 1)
+#
+#         # Extract features for hazard classification if training
+#         if self.training and hasattr(self, 'hazard_head'):
+#             # Pool features from each level's input
+#             hazard_features = []
+#             for i, xi in enumerate(x):
+#                 # Get the input features before detection head processing
+#                 # We need the features from the backbone, not the detection output
+#                 # Use the features from before cv2/cv3 processing
+#                 feat = xi  # This is already the concatenated detection features
+#                 pooled = F.adaptive_avg_pool2d(feat, 1).flatten(1)
+#                 hazard_features.append(pooled)
+#
+#             # Concatenate pooled features
+#             hazard_feat = torch.cat(hazard_features, dim=1)
+#
+#             # Get hazard predictions
+#             hazard_logits = self.hazard_head(hazard_feat)
+#
+#             # Return both detection and hazard outputs
+#             return x, hazard_logits
+#
+#         # Inference mode - standard detection only
+#         y = self._inference(x)
+#         return y if self.export else (y, x)
+#
+#     # def forward(self, x):
+#     #     """
+#     #     Forward pass with hazard classification, handling initialization, training, and inference.
+#     #     """
+#     #     # 1) Save a shallow copy of the original neck features BEFORE they get modified.
+#     #     neck_feats = [xi for xi in x]
+#     #
+#     #     # 2) Perform the standard detection forward pass, which overwrites 'x'.
+#     #     for i in range(self.nl):
+#     #         x[i] = torch.cat((self.cv2[i](x[i]), self.cv3[i](x[i])), 1)
+#     #
+#     #     # 3) **CRITICAL FIX**: Check if we are in the model initialization phase.
+#     #     # The model's __init__ runs a forward pass to calculate strides BEFORE
+#     #     # the `self.stride` attribute is assigned. If it doesn't exist, we must
+#     #     # return only the list of feature maps `x` that the initializer expects.
+#     #     if not hasattr(self, 'stride'):
+#     #         return x
+#     #
+#     #     # 4) If we are past initialization, proceed with normal training/inference logic.
+#     #     if self.training and hasattr(self, 'hazard_head'):
+#     #         # Use the saved 'neck_feats' for hazard classification.
+#     #         pooled_features = [F.adaptive_avg_pool2d(feat, 1).flatten(1) for feat in neck_feats]
+#     #         hazard_feat = torch.cat(pooled_features, dim=1)
+#     #         hazard_logits = self.hazard_head(hazard_feat)
+#     #
+#     #         # Return the tuple that the trainer expects for loss calculation.
+#     #         return x, hazard_logits
+#     #
+#     #     # 5) Inference path remains unchanged.
+#     #     y = self._inference(x)
+#     #     return y if self.export else (y, x)
 
 class Segment(Detect):
     """

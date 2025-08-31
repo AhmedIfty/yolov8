@@ -1,3 +1,5 @@
+# ultralytics/cfg/models/v8/yolov8m-hazard.yaml
+
 ## Ultralytics 🚀 AGPL-3.0 License - https://ultralytics.com/license
 #
 ## Ultralytics YOLOv8 object detection model with P3/8 - P5/32 outputs
@@ -9,10 +11,19 @@
 # YOLOv8m with Hazard Detection Head
 
 # Parameters
+#nc: 7  # number of classes (your waste dataset)
+#scales: # model compound scaling constants
+#  depth: 0.67
+#  width: 0.75
+
+
+# YOLOv8m with Hazard Detection Head
+
+# Parameters
 nc: 7  # number of classes (your waste dataset)
-scales: # model compound scaling constants
-  depth: 0.67
-  width: 0.75
+scales:
+  # model compound scaling constants [depth, width, max_channels]
+  m: [0.67, 0.75, 768]
 
 # YOLOv8.0m backbone
 backbone:
@@ -46,9 +57,52 @@ head:
   - [[-1, 9], 1, Concat, [1]]  # cat head P5
   - [-1, 3, C2f, [768]]  # 21 (P5/32-large)
 
-  # HazardDetect instead of standard Detect
-  - [[15, 18, 21], 1, HazardDetect, [nc, 1, 0.5]]  # HazardDetect(P3, P4, P5)
-  # Args: [nc, medical_idx, lambda_hz]
+  # HazardDetect with correct format
+  - [[15, 18, 21], 1, HazardDetect, [nc]]  # Detection layers (P3, P4, P5)
+
+
+
+
+#nc: 7  # number of classes
+#scales:
+#  # This is the correct format: [depth, width, max_channels]
+#  m: [0.67, 0.75, 768]
+#
+## YOLOv8.0m backbone
+#backbone:
+#  # [from, repeats, module, args]
+#  - [-1, 1, Conv, [64, 3, 2]]  # 0-P1/2
+#  - [-1, 1, Conv, [128, 3, 2]]  # 1-P2/4
+#  - [-1, 3, C2f, [128, True]]
+#  - [-1, 1, Conv, [256, 3, 2]]  # 3-P3/8
+#  - [-1, 6, C2f, [256, True]]
+#  - [-1, 1, Conv, [512, 3, 2]]  # 5-P4/16
+#  - [-1, 6, C2f, [512, True]]
+#  - [-1, 1, Conv, [768, 3, 2]]  # 7-P5/32
+#  - [-1, 3, C2f, [768, True]]
+#  - [-1, 1, SPPF, [768, 5]]  # 9
+#
+## YOLOv8.0m head with HazardDetect
+#head:
+#  - [-1, 1, nn.Upsample, [None, 2, 'nearest']]
+#  - [[-1, 6], 1, Concat, [1]]  # cat backbone P4
+#  - [-1, 3, C2f, [512]]  # 12
+#
+#  - [-1, 1, nn.Upsample, [None, 2, 'nearest']]
+#  - [[-1, 4], 1, Concat, [1]]  # cat backbone P3
+#  - [-1, 3, C2f, [256]]  # 15 (P3/8-small)
+#
+#  - [-1, 1, Conv, [256, 3, 2]]
+#  - [[-1, 12], 1, Concat, [1]]  # cat head P4
+#  - [-1, 3, C2f, [512]]  # 18 (P4/16-medium)
+#
+#  - [-1, 1, Conv, [512, 3, 2]]
+#  - [[-1, 9], 1, Concat, [1]]  # cat head P5
+#  - [-1, 3, C2f, [768]]  # 21 (P5/32-large)
+#
+#  # HazardDetect instead of standard Detect
+#  - [[15, 18, 21], 1, HazardDetect, [nc, 1, 0.5]]  # HazardDetect(P3, P4, P5)
+#  # Args: [nc, medical_idx, lambda_hz]
 
 
 
