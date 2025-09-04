@@ -17,6 +17,9 @@ Examples:
     >>> os.system(f"onnxslim {f} {f} && open {f}")  # pip install onnxslim
 """
 
+# from .caf import C2fCAF, ResCBAMLite, BiFPNAdd
+from .caf import C2fCAF, BiFPNAdd, ResCBAM
+
 from .block import (
     C1,
     C2,
@@ -179,4 +182,8 @@ __all__ = (
     "TorchVision",
     "Index",
     "A2C2f",
+    "C2fCAF",
+    # "ResCBAMLite",
+    "ResCBAM",
+    "BiFPNAdd",
 )
