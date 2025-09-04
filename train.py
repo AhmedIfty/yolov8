@@ -12,3 +12,4 @@ if __name__ == '__main__':
         name='waste-exp1',
         exist_ok=True
     )
+
