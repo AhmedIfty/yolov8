@@ -3,7 +3,7 @@ from ultralytics import YOLO
 
 # DATA_YAML = 'dataset/waste_cleanval.yaml'  # or 'dataset/data.yaml' if you skipped clean-val
 
-DATA_YAML = 'dataset-640/data.yaml'
+DATA_YAML = 'dataset-refined-640-v1/data.yaml'
 
 if __name__ == '__main__':
     model = YOLO('yolov8m.pt')
@@ -11,7 +11,7 @@ if __name__ == '__main__':
         data=DATA_YAML,
         epochs=15,               # short freeze probe
         imgsz=640,
-        batch=16,                # drop to 12/8 if OOM
+        batch=8,                # drop to 12/8 if OOM
         multi_scale=True,
         mosaic=1.0, mixup=0.2,  # heavy aug; reduce later if unstable
         hsv_h=0.015, hsv_s=0.7, hsv_v=0.4,
@@ -22,7 +22,7 @@ if __name__ == '__main__':
         warmup_epochs=3,
         freeze=10,               # freeze early backbone layers
         patience=20,             # early stop if it stalls
-        amp=True, workers=8,
+        amp=True, workers=1,
         device=0,
-        project='runs/train', name='waste_freeze_640', exist_ok=True
+        project='runs/train', name='refined-exp1-baseline', exist_ok=True,
     )

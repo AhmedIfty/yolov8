@@ -1,11 +1,11 @@
 # scripts/train_full_640_fast.py
 from ultralytics import YOLO
 
-DATA_YAML = 'dataset-640/data.yaml'   # use the SAME val split as Stage-A for apples-to-apples
+DATA_YAML = 'dataset-refined-640-v1/data.yaml'   # use the SAME val split as Stage-A for apples-to-apples
 
 COMMON = dict(
     imgsz=640,
-    batch=16,                 # drop to 12/8 if OOM
+    batch=8,                 # drop to 12/8 if OOM
     multi_scale=False,        # SPEED: keep a fixed 640
     mosaic=0.5,               # lighter than 1.0 for Stage-B
     mixup=0.1,                # lighter than 0.2 for Stage-B
@@ -16,9 +16,9 @@ COMMON = dict(
     momentum=0.90, weight_decay=0.0005,
     warmup_epochs=3,
     amp=True,
-    workers=4,                # Windows-friendly
+    workers=1,                # Windows-friendly
     cache=True,               # SPEED: cache images/labels in RAM (epoch 2+ faster)
-    patience=30,              # early stop
+    patience=20,              # early stop
     # Optional pure speed:
     # val=False,             # skip per-epoch val; run model.val() yourself every N epochs
     # plots=False,           # reduce overhead from plotting
@@ -26,15 +26,15 @@ COMMON = dict(
 
 if __name__ == '__main__':
     # Start from Stage-A best
-    model = YOLO('runs/train/waste_freeze_640/weights/best.pt')
+    model = YOLO('runs/train/refined-exp1-baseline/weights/best.pt')
 
     model.train(
         data=DATA_YAML,
-        epochs=85,            # 15 + 85 ≈ 100 total; early stopping enabled
+        epochs=40,            # 15 + 85 ≈ 100 total; early stopping enabled
         freeze=0,
         device=0,
         project='runs/train',
-        name='waste_full_640_fast',
+        name='refined-exp1-baseline-full',
         exist_ok=True,
         **COMMON
     )

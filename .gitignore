@@ -13,6 +13,25 @@ __pycache__/
 # C extensions
 *.so
 
+# Ignore dataset folders
+dataset-1024/
+dataset-1280/
+dataset-640/
+dataset-gray-clahe/
+dataset-gray-highboost/
+dataset-raw/
+dataset-rgb-clahe/
+dataset-rgb-laplacian/
+
+# Ignore dataset zip file
+dataset-640.zip
+runs.zip
+ultralytics.zip
+
+
+
+
+
 # Distribution / packaging
 .Python
 build/
