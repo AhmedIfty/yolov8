@@ -102,7 +102,8 @@ from .transformer import (
     TransformerLayer,
 )
 
-from .bifpn_eca import BiFPN_ECA, ECA, WeightedAdd, SeparableConv
+#from .bifpn_eca import BiFPN_ECA, ECA, WeightedAdd, SeparableConv
+from .bifpn_eca import BiFPN_ECA, BiFPNIndex, ECA, WeightedAdd, SeparableConv
 
 __all__ = (
     "Conv",
@@ -182,7 +183,9 @@ __all__ = (
     "Index",
     "A2C2f",
     "BiFPN_ECA",
+    "BiFPNIndex",
     "ECA",
     "WeightedAdd",
     "SeparableConv",
+
 )

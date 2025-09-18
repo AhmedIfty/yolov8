@@ -1,8 +1,11 @@
-# YOLOv8m with P2 + BiFPN+ECA
-nc: 7  # number of classes
+# YOLOv8m with P2 + PAN + BiFPN Refiner
+# Save as: cfg/models/v8/yolov8m_p2_bifpn_refiner.yaml
+
+nc: 7  # number of classes (e.g., 80 for COCO)
 scales:
   m: [0.67, 0.75, 768]
 
+# YOLOv8m backbone
 backbone:
   # [from, repeats, module, args]
   - [-1, 1, Conv, [64, 3, 2]]      # 0-P1/2
@@ -14,59 +17,81 @@ backbone:
   - [-1, 6, C2f, [512, True]]      # 6  (P4)
   - [-1, 1, Conv, [1024, 3, 2]]    # 7-P5/32
   - [-1, 3, C2f, [1024, True]]     # 8
-  - [-1, 1, SPPF, [1024, 5]]       # 9  (P5)
+  - [-1, 1, SPPF, [1024, 5]]       # 9
 
+# YOLOv8 P2 head with PAN
 head:
-  # BiFPN_ECA fusion
-  - [[2, 4, 6, 9], 1, BiFPN_ECA, [256]]  # 10
-  # CRITICAL: Detect must reference BiFPN output (index 10)
-  - [10, 1, Detect, [nc]]  # 11 - Detect from BiFPN output
+  - [-1, 1, nn.Upsample, [None, 2, "nearest"]]  # 10
+  - [[-1, 6], 1, Concat, [1]]                   # 11 cat backbone P4
+  - [-1, 3, C2f, [512]]                         # 12
+  - [-1, 1, nn.Upsample, [None, 2, "nearest"]]  # 13
+  - [[-1, 4], 1, Concat, [1]]                   # 14 cat backbone P3
+  - [-1, 3, C2f, [256]]                         # 15 (P3/8-small)
+  - [-1, 1, nn.Upsample, [None, 2, "nearest"]]  # 16
+  - [[-1, 2], 1, Concat, [1]]                   # 17 cat backbone P2
+  - [-1, 3, C2f, [128]]                         # 18 (P2/4-xsmall) - PAN output 1
+  - [-1, 1, Conv, [128, 3, 2]]                  # 19
+  - [[-1, 15], 1, Concat, [1]]                  # 20 cat head P3
+  - [-1, 3, C2f, [256]]                         # 21 (P3/8-small) - PAN output 2
+  - [-1, 1, Conv, [256, 3, 2]]                  # 22
+  - [[-1, 12], 1, Concat, [1]]                  # 23 cat head P4
+  - [-1, 3, C2f, [512]]                         # 24 (P4/16-medium) - PAN output 3
+  - [-1, 1, Conv, [512, 3, 2]]                  # 25
+  - [[-1, 9], 1, Concat, [1]]                   # 26 cat head P5
+  - [-1, 3, C2f, [1024]]                        # 27 (P5/32-large) - PAN output 4
+
+  # BiFPN refiner - takes all 4 PAN outputs [P2, P3, P4, P5]
+  # Args: [internal_channels, use_eca] - starting with ECA disabled
+  - [[18, 21, 24, 27], 1, BiFPN_ECA, [192, False]]  # 28 -> returns a list of 4 tensors
+
+  # Split the BiFPN output list into 4 separate nodes for the Detect head
+  # Args: [channel_width (ignored by parser), index]
+  # Split the BiFPN output list into 4 separate nodes.
+  # The argument is now just the index [0], [1], etc.
+  - [28, 1, BiFPNIndex, [0]]  # 29 - P2 refined
+  - [28, 1, BiFPNIndex, [1]]  # 30 - P3 refined
+  - [28, 1, BiFPNIndex, [2]]  # 31 - P4 refined
+  - [28, 1, BiFPNIndex, [3]]  # 32 - P5 refined
+
+  # Detection head on the 4 refined feature maps
+  - [[29, 30, 31, 32], 1, Detect, [nc]]  # 33
 
 
-## YOLOv8m with P2 + one-layer True BiFPN (learnable weights) + ECA
-## Place this in your Ultralytics folder as: cfg/models/v8/yolov8m_p2_bifpn_eca.yaml
+
+## YOLOv8m with P2 + BiFPN+ECA
+#nc: 7  # number of classes
+#scales:
+#  m: [0.67, 0.75, 768]
 #
-#nc: 7  # number of classes for your dataset
-#scales:  # model compound scaling constants
-#  # [depth, width, max_channels]
-#  n: [0.33, 0.25, 1024]
-#  s: [0.33, 0.50, 1024]
-#  m: [0.67, 0.75, 768]   # Using m scale
-#  l: [1.00, 1.00, 512]
-#  x: [1.00, 1.25, 512]
-#
-## YOLOv8m backbone with P2
 #backbone:
 #  # [from, repeats, module, args]
 #  - [-1, 1, Conv, [64, 3, 2]]      # 0-P1/2
 #  - [-1, 1, Conv, [128, 3, 2]]     # 1-P2/4
-#  - [-1, 3, C2f, [128, True]]      # 2  (P2 output)
+#  - [-1, 3, C2f, [128, True]]      # 2  (P2)
 #  - [-1, 1, Conv, [256, 3, 2]]     # 3-P3/8
-#  - [-1, 6, C2f, [256, True]]      # 4  (P3 output)
+#  - [-1, 6, C2f, [256, True]]      # 4  (P3)
 #  - [-1, 1, Conv, [512, 3, 2]]     # 5-P4/16
-#  - [-1, 6, C2f, [512, True]]      # 6  (P4 output)
+#  - [-1, 6, C2f, [512, True]]      # 6  (P4)
 #  - [-1, 1, Conv, [1024, 3, 2]]    # 7-P5/32
 #  - [-1, 3, C2f, [1024, True]]     # 8
-#  - [-1, 1, SPPF, [1024, 5]]       # 9  (P5 output)
+#  - [-1, 1, SPPF, [1024, 5]]       # 9  (P5)
 #
-## BiFPN+ECA head
 #head:
-#  # True BiFPN + ECA fusion
-#  # Using 256 channels for BiFPN (common choice, you can adjust)
-#  - [[2, 4, 6, 9], 1, BiFPN_ECA, [256]]  # 10 - returns [P2o, P3o, P4o, P5o] with 256 channels each
+#  # BiFPN takes 4 inputs from the backbone and is registered as layer 10
+#  # It returns 4 feature maps, but for parsing, it's treated as a single block
+#  - [[2, 4, 6, 9], 1, BiFPN_ECA, [256]]  # 10
 #
-#  # Detection head on all 4 scales
-#  - [-1, 1, Detect, [nc]]  # 11 - Detect on 4 scales (strides 4, 8, 16, 32)
+#  # The Detect head takes its input from layer 10
+#  - [10, 1, Detect, [nc]]  # 11
+
+
+# YOLOv8m with P2 + True BiFPN (learnable, normalized) + ECA
+# 7 classes (set nc if different)
 
 
 
-
-## cfg/models/v8/yolov8m_p2_bifpn_eca.yaml
-## YOLOv8m with P2 + True BiFPN (learnable, normalized) + ECA
-## Works at 640x640, 7 classes (edit nc if needed)
-#
 #nc: 7
-#scales: {m: [0.67, 0.75, 768]}  # same compound scaling as YOLOv8m
+#scales: {m: [0.67, 0.75, 768]}  # same as YOLOv8m
 #
 #backbone:
 #  # [from, repeats, module, args]
@@ -82,8 +107,18 @@ head:
 #  - [-1, 1, SPPF, [768, 5]]        # 9  (P5)
 #
 #head:
-#  # True BiFPN + ECA over [P2,P3,P4,P5]
-#  # Pass a single int (e.g., 256) to use the same internal channels on all levels.
-#  # The module auto-projects backbone channels to this size.
-#  - [[2, 4, 6, 9], 1, BiFPN_ECA, [256]]   # returns [P2o, P3o, P4o, P5o]
-#  - [-1, 1, Detect, [nc]]                 # Detect on 4 scales (strides 4,8,16,32)
+#  # BiFPN_ECA consumes [P2,P3,P4,P5] = [2,4,6,9] and returns a list of 4 tensors
+#  - [[2, 4, 6, 9], 1, BiFPN_ECA, [256]]   # 10 -> returns [P2o,P3o,P4o,P5o] (each C=256)
+#
+#  # Split the list output into 4 graph nodes using Index (declare channels=256 explicitly)
+#  - [10, 1, Index, [256, 0]]              # 11 -> P2_fused
+#  - [10, 1, Index, [256, 1]]              # 12 -> P3_fused
+#  - [10, 1, Index, [256, 2]]              # 13 -> P4_fused
+#  - [10, 1, Index, [256, 3]]              # 14 -> P5_fused
+#
+#  # Detect must take the four nodes explicitly; Detect must be the LAST layer
+#  - [[11, 12, 13, 14], 1, Detect, [nc]]   # 15
+
+
+
+

@@ -5,18 +5,14 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 
-# ----------------------
-# Small building blocks
-# ----------------------
-
 class SeparableConv(nn.Module):
-    """Depthwise + Pointwise conv, BN, SiLU. Channel-preserving."""
+    """Depthwise + Pointwise conv with BN and SiLU."""
 
-    def __init__(self, c: int):
+    def __init__(self, c_in, c_out):
         super().__init__()
-        self.dw = nn.Conv2d(c, c, 3, 1, 1, groups=c, bias=False)
-        self.pw = nn.Conv2d(c, c, 1, 1, 0, bias=False)
-        self.bn = nn.BatchNorm2d(c)
+        self.dw = nn.Conv2d(c_in, c_in, 3, 1, 1, groups=c_in, bias=False)
+        self.pw = nn.Conv2d(c_in, c_out, 1, 1, 0, bias=False)
+        self.bn = nn.BatchNorm2d(c_out)
         self.act = nn.SiLU(inplace=True)
 
     def forward(self, x):
@@ -27,9 +23,7 @@ class SeparableConv(nn.Module):
 
 
 class WeightedAdd(nn.Module):
-    """Learnable normalized weighted sum (BiFPN-style).
-    ReLU(w) then L1 normalization to keep weights positive and stable.
-    """
+    """Learnable weighted sum with ReLU + L1 normalization."""
 
     def __init__(self, n_inputs: int, eps: float = 1e-4):
         super().__init__()
@@ -37,7 +31,6 @@ class WeightedAdd(nn.Module):
         self.eps = eps
 
     def forward(self, xs):
-        # xs: list[Tensor] with same shape (B, C, H, W)
         w = F.relu(self.w)
         w = w / (w.sum() + self.eps)
         out = 0
@@ -47,177 +40,141 @@ class WeightedAdd(nn.Module):
 
 
 class ECA(nn.Module):
-    """Efficient Channel Attention: 1D conv on pooled channels, very lightweight."""
+    """Efficient Channel Attention with residual gating."""
 
-    def __init__(self, c: int, gamma: float = 2.0, b: float = 1.0):
+    def __init__(self, channels, k=None, alpha=0.5, use_eca=True):
         super().__init__()
-        t = int(abs((math.log2(c) / gamma) + b))
-        k = t if t % 2 else t + 1
+        self.use_eca = use_eca
+        self.alpha = alpha  # 0=identity, 1=full gate
+
+        if k is None:
+            # Adaptive kernel size based on channel count
+            k = int(round(math.log2(channels) + 1))
+            if k % 2 == 0:
+                k += 1
+
         self.conv = nn.Conv1d(1, 1, kernel_size=k, padding=k // 2, bias=False)
         self.sigmoid = nn.Sigmoid()
 
     def forward(self, x):
-        # x: [B,C,H,W]
-        y = F.adaptive_avg_pool2d(x, 1)  # [B,C,1,1]
-        y = self.conv(y.squeeze(-1).transpose(-1, -2))  # [B,1,C] via 1D conv
-        y = self.sigmoid(y.transpose(-1, -2).unsqueeze(-1))  # [B,C,1,1]
-        return x * y.expand_as(x)
+        if not self.use_eca:
+            return x
+
+        # Channel attention
+        y = F.adaptive_avg_pool2d(x, 1)  # [B, C, 1, 1]
+        y = self.conv(y.squeeze(-1).transpose(-1, -2))  # [B, 1, C]
+        y = self.sigmoid(y).transpose(-1, -2).unsqueeze(-1)  # [B, C, 1, 1]
+
+        # Residual gating: x * (alpha * gate + (1 - alpha))
+        return x * (self.alpha * y + (1 - self.alpha))
 
 
-# ----------------------
-# Utilities
-# ----------------------
-
-def _upsample_to(x: torch.Tensor, ref: torch.Tensor) -> torch.Tensor:
-    """Nearest-neighbor upsample to ref's HxW (stable for detection)."""
+def _upsample_to(x, ref):
+    """Upsample x to match ref's spatial dimensions."""
     if x.shape[2:] == ref.shape[2:]:
         return x
-    return F.interpolate(x, size=ref.shape[-2:], mode='nearest')
+    return F.interpolate(x, size=ref.shape[2:], mode='nearest')
 
 
-def _downsample_to(x: torch.Tensor, ref: torch.Tensor) -> torch.Tensor:
-    """Downsample by stride-2 maxpool until spatial size matches ref."""
-    h, w = x.shape[2], x.shape[3]
-    hr, wr = ref.shape[2], ref.shape[3]
-    y = x
-    # Typical case is exactly 2x; loop keeps this robust.
-    while (y.shape[2] > hr) or (y.shape[3] > wr):
-        y = F.max_pool2d(y, kernel_size=2, stride=2)
-    if y.shape[2:] != ref.shape[2:]:
-        # If one step of pooling overshot due to odd sizes, do a safe interpolate
-        y = F.interpolate(y, size=ref.shape[-2:], mode='nearest')
-    return y
+def _downsample_to(x, ref):
+    """Downsample x to match ref's spatial dimensions."""
+    h, w = x.shape[2:]
+    hr, wr = ref.shape[2:]
+    while h > hr or w > wr:
+        x = F.max_pool2d(x, kernel_size=2, stride=2)
+        h, w = x.shape[2:]
+    if x.shape[2:] != ref.shape[2:]:
+        x = F.interpolate(x, size=ref.shape[2:], mode='nearest')
+    return x
 
-
-# ----------------------
-# One-layer BiFPN + ECA
-# ----------------------
 
 class BiFPN_ECA(nn.Module):
-    """
-    True BiFPN layer with learnable normalized fusion and ECA gates.
-    Expects a 4-level pyramid: [P2, P3, P4, P5] from indices.
+    """BiFPN refiner layer to be added AFTER PAN."""
 
-    Args:
-        channels: List of target channel counts for [P2, P3, P4, P5] outputs
-
-    The module will automatically handle channel projection from input to target channels.
-    """
-
-    def __init__(self, channels=256):
+    def __init__(self, c=192, use_eca=False, eca_alpha=0.5):
         super().__init__()
+        self.c = c
+        self.use_eca = use_eca if isinstance(use_eca, bool) else (use_eca[0] if isinstance(use_eca, list) else False)
+        self.eca_alpha = eca_alpha
 
-        # Handle both single int and list inputs for channels
-        if isinstance(channels, int):
-            # Use same channels for all levels
-            c2 = c3 = c4 = c5 = channels
-        elif isinstance(channels, (list, tuple)) and len(channels) == 1:
-            # If a single-element list is passed, use that value for all levels
-            c2 = c3 = c4 = c5 = channels[0]
-        elif isinstance(channels, (list, tuple)) and len(channels) == 4:
-            c2, c3, c4, c5 = channels
-        else:
-            raise ValueError(f"channels must be int or list of 1 or 4 ints, got {channels}")
+        self.proj = nn.ModuleList()
+        self.proj_built = False
 
-        # Store target channels
-        self.target_channels = [c2, c3, c4, c5]
-
-        # Channel projection layers (will be initialized in forward based on input channels)
-        self.input_projs = nn.ModuleList()
-        self.input_projs_initialized = False
-
-        # Top-down fusion ops
+        # Top-down fusion
         self.p4_td_w = WeightedAdd(2)
-        self.p4_td_c = SeparableConv(c4)
-        self.p4_td_eca = ECA(c4)
-
+        self.p4_td_c = SeparableConv(c, c)
         self.p3_td_w = WeightedAdd(2)
-        self.p3_td_c = SeparableConv(c3)
-        self.p3_td_eca = ECA(c3)
-
+        self.p3_td_c = SeparableConv(c, c)
         self.p2_td_w = WeightedAdd(2)
-        self.p2_td_c = SeparableConv(c2)
-        self.p2_td_eca = ECA(c2)
+        self.p2_td_c = SeparableConv(c, c)
 
-        # Bottom-up fusion ops
+        # Bottom-up fusion
         self.p3_out_w = WeightedAdd(3)
-        self.p3_out_c = SeparableConv(c3)
-        self.p3_out_eca = ECA(c3)
-
+        self.p3_out_c = SeparableConv(c, c)
         self.p4_out_w = WeightedAdd(3)
-        self.p4_out_c = SeparableConv(c4)
-        self.p4_out_eca = ECA(c4)
-
+        self.p4_out_c = SeparableConv(c, c)
         self.p5_out_w = WeightedAdd(2)
-        self.p5_out_c = SeparableConv(c5)
-        self.p5_out_eca = ECA(c5)
+        self.p5_out_c = SeparableConv(c, c)
 
-        # Optional refinement for P5 start
-        self.p5_refine = SeparableConv(c5)
+        # ECA modules for each output
+        self.eca2 = ECA(c, alpha=eca_alpha, use_eca=self.use_eca)
+        self.eca3 = ECA(c, alpha=eca_alpha, use_eca=self.use_eca)
+        self.eca4 = ECA(c, alpha=eca_alpha, use_eca=self.use_eca)
+        self.eca5 = ECA(c, alpha=eca_alpha, use_eca=self.use_eca)
 
-    def _init_input_projs(self, xs):
-        """Initialize input projection layers based on actual input channels."""
-        if not self.input_projs_initialized:
-            for i, x in enumerate(xs):
-                in_channels = x.shape[1]
-                out_channels = self.target_channels[i]
-                if in_channels != out_channels:
-                    # Add 1x1 conv to project channels
-                    proj = nn.Sequential(
-                        nn.Conv2d(in_channels, out_channels, 1, bias=False),
-                        nn.BatchNorm2d(out_channels)
-                    )
-                else:
-                    # Identity if channels match
-                    proj = nn.Identity()
-                self.input_projs.append(proj.to(xs[0].device))
-            self.input_projs_initialized = True
+        self._init_fusion_weights()
 
-    def forward(self, xs):
-        # Handle both list input and single tensor input from Ultralytics
-        if not isinstance(xs, (list, tuple)):
-            # If single tensor, it should be from Concat or similar
-            # This shouldn't happen with our YAML config, but handle it
-            raise ValueError("BiFPN_ECA expects a list of 4 tensors [P2, P3, P4, P5]")
+    def _init_fusion_weights(self):
+        """Initialize fusion weights to bias away from P2."""
+        with torch.no_grad():
+            self.p4_td_w.w[:] = torch.tensor([0.3, 0.7])  # [P4, up(P5)]
+            self.p3_td_w.w[:] = torch.tensor([0.3, 0.7])  # [P3, up(P4_td)]
+            self.p2_td_w.w[:] = torch.tensor([0.3, 0.7])  # [P2, up(P3_td)]
+            self.p3_out_w.w[:] = torch.tensor([0.4, 0.5, 0.1])  # [P3, P3_td, down(P2)]
+            self.p4_out_w.w[:] = torch.tensor([0.4, 0.5, 0.1])  # [P4, P4_td, down(P3)]
+            self.p5_out_w.w[:] = torch.tensor([0.6, 0.4])  # [P5, down(P4)]
 
-        if len(xs) != 4:
-            raise ValueError(f"BiFPN_ECA expects exactly 4 features, got {len(xs)}")
+    def _build_projections(self, in_channels):
+        """Build input projection layers based on actual input channels."""
+        if not self.proj_built:
+            for ch in in_channels:
+                self.proj.append(nn.Conv2d(ch, self.c, 1, bias=False))
+            self.proj_built = True
 
-        # Initialize input projections on first forward pass
-        self._init_input_projs(xs)
+    def forward(self, x):
+        """Forward pass for a list of 4 tensors [P2, P3, P4, P5] from PAN."""
+        features = x if isinstance(x, list) else [x]
+        if len(features) != 4:
+            raise ValueError(f"BiFPN_ECA expects exactly 4 features, got {len(features)}")
 
-        # Project inputs to target channels
-        P2 = self.input_projs[0](xs[0])
-        P3 = self.input_projs[1](xs[1])
-        P4 = self.input_projs[2](xs[2])
-        P5 = self.input_projs[3](xs[3])
+        in_channels = [f.shape[1] for f in features]
+        self._build_projections(in_channels)
+
+        # Project to internal channels
+        p2, p3, p4, p5 = [proj(f).to(features[0].device) for proj, f in zip(self.proj, features)]
 
         # Top-down pathway
-        P5_t = self.p5_refine(P5)
-
-        P4_td = self.p4_td_w([P4, _upsample_to(P5_t, P4)])
-        P4_td = self.p4_td_eca(self.p4_td_c(P4_td))
-
-        P3_td = self.p3_td_w([P3, _upsample_to(P4_td, P3)])
-        P3_td = self.p3_td_eca(self.p3_td_c(P3_td))
-
-        P2_td = self.p2_td_w([P2, _upsample_to(P3_td, P2)])
-        P2_o = self.p2_td_eca(self.p2_td_c(P2_td))  # final P2
+        p4_td = self.p4_td_c(self.p4_td_w([p4, _upsample_to(p5, p4)]))
+        p3_td = self.p3_td_c(self.p3_td_w([p3, _upsample_to(p4_td, p3)]))
+        p2_td = self.p2_td_c(self.p2_td_w([p2, _upsample_to(p3_td, p2)]))
 
         # Bottom-up pathway
-        P3_o = self.p3_out_w([P3, P3_td, _downsample_to(P2_o, P3)])
-        P3_o = self.p3_out_eca(self.p3_out_c(P3_o))
+        p2_out = self.eca2(p2_td)
+        p3_out = self.eca3(self.p3_out_c(self.p3_out_w([p3, p3_td, _downsample_to(p2_out, p3)])))
+        p4_out = self.eca4(self.p4_out_c(self.p4_out_w([p4, p4_td, _downsample_to(p3_out, p4)])))
+        p5_out = self.eca5(self.p5_out_c(self.p5_out_w([p5, _downsample_to(p4_out, p5)])))
 
-        P4_o = self.p4_out_w([P4, P4_td, _downsample_to(P3_o, P4)])
-        P4_o = self.p4_out_eca(self.p4_out_c(P4_o))
+        return [p2_out, p3_out, p4_out, p5_out]
 
-        P5_o = self.p5_out_w([P5, _downsample_to(P4_o, P5)])
-        P5_o = self.p5_out_eca(self.p5_out_c(P5_o))
 
-        # return [P2_o, P3_o, P4_o, P5_o]
+class BiFPNIndex(nn.Module):
+    """Extract a specific index from a list output."""
 
-        outputs = [P2_o, P3_o, P4_o, P5_o]
+    def __init__(self, index=0):
+        super().__init__()
+        self.index = index[1] if isinstance(index, list) and len(index) > 1 else (
+            index[0] if isinstance(index, list) else index)
 
-        # IMPORTANT: For Detect head compatibility
-        # Detect expects a list during training but might handle differently during export
-        return outputs  # Return as list for multi-scale detection
+    def forward(self, x):
+        """Extract tensor at specified index."""
+        return x[self.index] if isinstance(x, list) else x
