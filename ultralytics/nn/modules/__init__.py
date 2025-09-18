@@ -102,6 +102,8 @@ from .transformer import (
     TransformerLayer,
 )
 
+from .bifpn_eca import BiFPN_ECA, ECA, WeightedAdd, SeparableConv
+
 __all__ = (
     "Conv",
     "Conv2",
@@ -179,4 +181,8 @@ __all__ = (
     "TorchVision",
     "Index",
     "A2C2f",
+    "BiFPN_ECA",
+    "ECA",
+    "WeightedAdd",
+    "SeparableConv",
 )

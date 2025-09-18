@@ -1,0 +1,89 @@
+# YOLOv8m with P2 + BiFPN+ECA
+nc: 7  # number of classes
+scales:
+  m: [0.67, 0.75, 768]
+
+backbone:
+  # [from, repeats, module, args]
+  - [-1, 1, Conv, [64, 3, 2]]      # 0-P1/2
+  - [-1, 1, Conv, [128, 3, 2]]     # 1-P2/4
+  - [-1, 3, C2f, [128, True]]      # 2  (P2)
+  - [-1, 1, Conv, [256, 3, 2]]     # 3-P3/8
+  - [-1, 6, C2f, [256, True]]      # 4  (P3)
+  - [-1, 1, Conv, [512, 3, 2]]     # 5-P4/16
+  - [-1, 6, C2f, [512, True]]      # 6  (P4)
+  - [-1, 1, Conv, [1024, 3, 2]]    # 7-P5/32
+  - [-1, 3, C2f, [1024, True]]     # 8
+  - [-1, 1, SPPF, [1024, 5]]       # 9  (P5)
+
+head:
+  # BiFPN_ECA fusion
+  - [[2, 4, 6, 9], 1, BiFPN_ECA, [256]]  # 10
+  # CRITICAL: Detect must reference BiFPN output (index 10)
+  - [10, 1, Detect, [nc]]  # 11 - Detect from BiFPN output
+
+
+## YOLOv8m with P2 + one-layer True BiFPN (learnable weights) + ECA
+## Place this in your Ultralytics folder as: cfg/models/v8/yolov8m_p2_bifpn_eca.yaml
+#
+#nc: 7  # number of classes for your dataset
+#scales:  # model compound scaling constants
+#  # [depth, width, max_channels]
+#  n: [0.33, 0.25, 1024]
+#  s: [0.33, 0.50, 1024]
+#  m: [0.67, 0.75, 768]   # Using m scale
+#  l: [1.00, 1.00, 512]
+#  x: [1.00, 1.25, 512]
+#
+## YOLOv8m backbone with P2
+#backbone:
+#  # [from, repeats, module, args]
+#  - [-1, 1, Conv, [64, 3, 2]]      # 0-P1/2
+#  - [-1, 1, Conv, [128, 3, 2]]     # 1-P2/4
+#  - [-1, 3, C2f, [128, True]]      # 2  (P2 output)
+#  - [-1, 1, Conv, [256, 3, 2]]     # 3-P3/8
+#  - [-1, 6, C2f, [256, True]]      # 4  (P3 output)
+#  - [-1, 1, Conv, [512, 3, 2]]     # 5-P4/16
+#  - [-1, 6, C2f, [512, True]]      # 6  (P4 output)
+#  - [-1, 1, Conv, [1024, 3, 2]]    # 7-P5/32
+#  - [-1, 3, C2f, [1024, True]]     # 8
+#  - [-1, 1, SPPF, [1024, 5]]       # 9  (P5 output)
+#
+## BiFPN+ECA head
+#head:
+#  # True BiFPN + ECA fusion
+#  # Using 256 channels for BiFPN (common choice, you can adjust)
+#  - [[2, 4, 6, 9], 1, BiFPN_ECA, [256]]  # 10 - returns [P2o, P3o, P4o, P5o] with 256 channels each
+#
+#  # Detection head on all 4 scales
+#  - [-1, 1, Detect, [nc]]  # 11 - Detect on 4 scales (strides 4, 8, 16, 32)
+
+
+
+
+## cfg/models/v8/yolov8m_p2_bifpn_eca.yaml
+## YOLOv8m with P2 + True BiFPN (learnable, normalized) + ECA
+## Works at 640x640, 7 classes (edit nc if needed)
+#
+#nc: 7
+#scales: {m: [0.67, 0.75, 768]}  # same compound scaling as YOLOv8m
+#
+#backbone:
+#  # [from, repeats, module, args]
+#  - [-1, 1, Conv, [64, 3, 2]]      # 0-P1/2
+#  - [-1, 1, Conv, [128, 3, 2]]     # 1-P2/4
+#  - [-1, 3, C2f, [128, True]]      # 2  (P2)
+#  - [-1, 1, Conv, [256, 3, 2]]     # 3-P3/8
+#  - [-1, 6, C2f, [256, True]]      # 4  (P3)
+#  - [-1, 1, Conv, [512, 3, 2]]     # 5-P4/16
+#  - [-1, 6, C2f, [512, True]]      # 6  (P4)
+#  - [-1, 1, Conv, [768, 3, 2]]     # 7-P5/32
+#  - [-1, 3, C2f, [768, True]]      # 8
+#  - [-1, 1, SPPF, [768, 5]]        # 9  (P5)
+#
+#head:
+#  # True BiFPN + ECA over [P2,P3,P4,P5]
+#  # Pass a single int (e.g., 256) to use the same internal channels on all levels.
+#  # The module auto-projects backbone channels to this size.
+#  - [[2, 4, 6, 9], 1, BiFPN_ECA, [256]]   # returns [P2o, P3o, P4o, P5o]
+#  - [-1, 1, Detect, [nc]]                 # Detect on 4 scales (strides 4,8,16,32)

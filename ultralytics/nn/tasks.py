@@ -69,6 +69,9 @@ from ultralytics.nn.modules import (
     YOLOESegment,
     v10Detect,
 )
+
+from .modules.bifpn_eca import BiFPN_ECA
+
 from ultralytics.utils import DEFAULT_CFG_DICT, DEFAULT_CFG_KEYS, LOGGER, YAML, colorstr, emojis
 from ultralytics.utils.checks import check_requirements, check_suffix, check_yaml
 from ultralytics.utils.loss import (
@@ -1714,6 +1717,30 @@ def parse_model(d, ch, verbose=True):
             args = [ch[f]]
         elif m is Concat:
             c2 = sum(ch[x] for x in f)
+
+        # NEW
+        elif m is BiFPN_ECA:
+            # BiFPN_ECA expects channels argument (single int or list)
+            # f should be a list of 4 indices [P2, P3, P4, P5]
+            if not isinstance(f, list) or len(f) != 4:
+                raise ValueError(f"BiFPN_ECA requires exactly 4 input indices, got {f}")
+
+            # Get input channels from the specified layers
+            in_channels = [ch[x] for x in f]
+
+            # Use the channels argument from YAML (default 256)
+            if args:
+                target_channels = args[0] if isinstance(args[0], int) else args[0][0]
+            else:
+                target_channels = 256  # Default fallback
+
+            # BiFPN_ECA expects just the target channels as argument
+            args = [target_channels]
+
+            # Output channels are the target channels
+            # BiFPN_ECA returns a list of 4 tensors, but we track single channel count
+            c2 = target_channels
+
         elif m in frozenset(
             {Detect, WorldDetect, YOLOEDetect, Segment, YOLOESegment, Pose, OBB, ImagePoolingAttn, v10Detect}
         ):
@@ -1734,6 +1761,29 @@ def parse_model(d, ch, verbose=True):
             c2 = args[0]
             c1 = ch[f]
             args = [*args[1:]]
+
+        #NEW
+        # elif m is BiFPN_ECA:
+        #     # BiFPN_ECA expects channels argument (single int or list)
+        #     # f should be a list of 4 indices [P2, P3, P4, P5]
+        #     if not isinstance(f, list) or len(f) != 4:
+        #         raise ValueError(f"BiFPN_ECA requires exactly 4 input indices, got {f}")
+        #
+        #     # Get input channels from the specified layers
+        #     in_channels = [ch[x] for x in f]
+        #
+        #     # Use the channels argument from YAML (default 256)
+        #     if args:
+        #         target_channels = args[0] if isinstance(args[0], int) else args[0][0]
+        #     else:
+        #         target_channels = 256  # Default fallback
+        #
+        #     # BiFPN_ECA expects just the target channels as argument
+        #     args = [target_channels]
+        #
+        #     # Output channels are the target channels
+        #     c2 = target_channels
+
         else:
             c2 = ch[f]
 
