@@ -68,6 +68,7 @@ from ultralytics.nn.modules import (
     YOLOEDetect,
     YOLOESegment,
     v10Detect,
+    WeightedSumFusion,
 )
 from ultralytics.utils import DEFAULT_CFG_DICT, DEFAULT_CFG_KEYS, LOGGER, YAML, colorstr, emojis
 from ultralytics.utils.checks import check_requirements, check_suffix, check_yaml
@@ -1714,6 +1715,15 @@ def parse_model(d, ch, verbose=True):
             args = [ch[f]]
         elif m is Concat:
             c2 = sum(ch[x] for x in f)
+
+
+        elif m is WeightedSumFusion:
+            assert isinstance(f, list) and len(f) == 2, "WeightedSumFusion expects two inputs"
+            c0, c1 = ch[f[0]], ch[f[1]]
+            cout = min(c0, c1)  # match downstream C2f (channel-preserving)
+            args = [c0, c1, cout] + args
+            c2 = cout  # record output channels for the shape tracker
+
         elif m in frozenset(
             {Detect, WorldDetect, YOLOEDetect, Segment, YOLOESegment, Pose, OBB, ImagePoolingAttn, v10Detect}
         ):

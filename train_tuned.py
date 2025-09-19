@@ -3,7 +3,7 @@ import argparse
 
 def parse_args():
     p = argparse.ArgumentParser()
-    p.add_argument("--model", default="yolov8m-p2.yaml")  # P2 model config (make sure path exists)
+    p.add_argument("--model", default="yolov8m-p2-weighted.yaml")  # P2 model config (make sure path exists)
     p.add_argument("--weights", default="yolov8m.pt")    # COCO-pretrained base weights
     p.add_argument("--data", default="dataset-refined-v3/data.yaml")
     p.add_argument("--epochs", type=int, default=50)       # solid single-run target (early stop = 20)
@@ -11,7 +11,7 @@ def parse_args():
     p.add_argument("--batch", type=int, default=8)
     p.add_argument("--device", default=0)
     p.add_argument("--project", default="runs/train")
-    p.add_argument("--name", default="refined-exp4-tuned-p2")
+    p.add_argument("--name", default="refined-p2-weighted")
     return p.parse_args()
 
 def main():
