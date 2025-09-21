@@ -3,7 +3,7 @@ import argparse
 
 def parse_args():
     p = argparse.ArgumentParser()
-    p.add_argument("--weights", default="weights/yolov8m_refined_v4_baseline.pt")
+    p.add_argument("--weights", default="weights/yolov8m_refined_v4_cbam.pt")
     p.add_argument("--data",    default="dataset-refined-v4/data.yaml")
     p.add_argument("--imgsz",   type=int, default=640)
     p.add_argument("--device",  default=0)

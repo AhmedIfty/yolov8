@@ -11,6 +11,9 @@ import torch
 import torch.nn as nn
 
 from ultralytics.nn.autobackend import check_class_names
+
+from ultralytics.nn.modules import ResidualCBAM
+
 from ultralytics.nn.modules import (
     AIFI,
     C1,
@@ -1644,6 +1647,7 @@ def parse_model(d, ch, verbose=True):
             SCDown,
             C2fCIB,
             A2C2f,
+            ResidualCBAM,  # <— add this line
         }
     )
     repeat_modules = frozenset(  # modules with 'repeat' arguments
