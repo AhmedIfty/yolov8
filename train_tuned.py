@@ -5,13 +5,13 @@ import argparse
 def parse_args():
     p = argparse.ArgumentParser()
     p.add_argument("--weights", default="yolov8m.pt")
-    p.add_argument("--data", default="dataset-refined-v3/data.yaml")
+    p.add_argument("--data", default="dataset-refined-v4/data.yaml")
     p.add_argument("--epochs", type=int, default=50)       # solid single-run target (early stop = 20)
     p.add_argument("--imgsz", type=int, default=640)
     p.add_argument("--batch", type=int, default=8)
     p.add_argument("--device", default=0)
     p.add_argument("--project", default="runs/train")
-    p.add_argument("--name", default="refined-exp3-tuned")
+    p.add_argument("--name", default="refined-exp4-yolov8m")
     return p.parse_args()
 
 def main():
