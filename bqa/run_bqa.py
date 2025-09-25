@@ -5,7 +5,7 @@ from pathlib import Path
 import sys
 
 HERE = Path(__file__).resolve().parent
-BQA = HERE / "bqa_rerank_v3.py"
+BQA = HERE / "bqa_rerank_v5.py"
 
 def main():
     ap = argparse.ArgumentParser(description="BQA launcher (YOLO + CLIP reranker)")
