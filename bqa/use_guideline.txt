@@ -1,0 +1,28 @@
+You can query any of these sub-classes:
+
+Sharp objects:
+  knife, scissors, fork, pin (thumbtack/push pin), needle, razor (razor blade), nail,
+  axe (hatchet), screw
+
+Medical:
+  mask (face mask/surgical mask), glove (medical glove/gloves),
+  test tube (blood tube/vacutainer/lab tube),
+  syringe, medicine package (drug package/blister pack/pill strip/medicine pack)
+
+Plastic:
+  plastic bottle (PET bottle/water bottle)
+
+Paper:
+  paper (tissue/napkin/toilet paper/paper towel)
+
+Glass:
+  glass bottle
+
+Metal:
+  metal can (aluminum can/soda can/beer can/tin can), electronics (electronic device/circuit board)
+
+Notes:
+- For medical queries, CLIP only checks YOLO boxes labeled “medical”.
+- For sharp-object queries, CLIP only checks YOLO boxes labeled “sharp-object”.
+- For plastic/paper/glass/metal queries, CLIP is gated to those super-classes respectively.
+- If a box doesn’t meet the confidence/margin thresholds, it won’t be labeled.
