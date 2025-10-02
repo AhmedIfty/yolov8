@@ -163,27 +163,51 @@ def main():
             results.append((q, 0, 0.0, 0, 0))
             continue
         prec, rec, ap = pr_from_tp_fp(tp, fp, n_gt)
+        fn = n_gt - int(tp.sum())
+        # Optional: best F1 over the sampled PR points
+        f1 = 0.0
+        if len(prec) and len(rec):
+            f1 = float(np.max((2 * prec * rec) / np.maximum(prec + rec, 1e-9)))
         macro_aps.append(ap)
         # save PR curve
         pr_csv = out_dir / f"pr_{q.replace(' ','_')}.csv"
         with open(pr_csv, "w", newline="", encoding="utf-8") as f:
             w = csv.writer(f); w.writerow(["precision","recall"])
             for P,R in zip(prec, rec): w.writerow([f"{P:.6f}", f"{R:.6f}"])
-        results.append((q, n_gt, ap, int(tp.sum()), int(fp.sum())))
+        # results.append((q, n_gt, ap, int(tp.sum()), int(fp.sum())))
+        results.append((q, n_gt, ap, int(tp.sum()), int(fp.sum()), fn, f1))
 
     # 4) write summary table
+    # sum_csv = out_dir / "summary.csv"
+    # with open(sum_csv, "w", newline="", encoding="utf-8") as f:
+    #     w = csv.writer(f)
+    #     w.writerow(["query", "n_gt", "AP@0.5", "TP", "FP", "FN", "best_F1"])
+    #     for q, n_gt, ap, tp_sum, fp_sum, fn, f1 in results:
+    #         w.writerow([q, n_gt, f"{ap:.4f}", tp_sum, fp_sum, fn, f"{f1:.4f}"])
+    #     if macro_aps:
+    #         w.writerow([])
+    #         w.writerow(["macro_avg", sum(n_gt for _,n_gt,_,_,_ in results), f"{np.mean(macro_aps):.4f}", "", ""])
+    # print(f"[OK] Wrote {sum_csv.resolve()}")
+    # ... after building `results` and `macro_aps` ...
+
     sum_csv = out_dir / "summary.csv"
     with open(sum_csv, "w", newline="", encoding="utf-8") as f:
         w = csv.writer(f)
-        w.writerow(["query","n_gt","AP@0.5","TP","FP"])
-        for q,n_gt,ap,tp_sum,fp_sum in results:
-            w.writerow([q, n_gt, f"{ap:.4f}", tp_sum, fp_sum])
+        w.writerow(["query", "n_gt", "AP@0.5", "TP", "FP", "FN", "best_F1"])
+        for row in results:
+            # row = (q, n_gt, ap, tp_sum, fp_sum, fn, f1)
+            w.writerow([row[0], row[1], f"{row[2]:.4f}", row[3], row[4], row[5], f"{row[6]:.4f}"])
+
         if macro_aps:
+            # total n_gt = sum of the 2nd element of each row
+            total_n_gt = sum(r[1] for r in results)
             w.writerow([])
-            w.writerow(["macro_avg", sum(n_gt for _,n_gt,_,_,_ in results), f"{np.mean(macro_aps):.4f}", "", ""])
-    print(f"[OK] Wrote {sum_csv.resolve()}")
+            w.writerow(["macro_avg", total_n_gt, f"{np.mean(macro_aps):.4f}", "", "", "", ""])
 
 if __name__ == "__main__":
     main()
 
 # python tools/eval_ap.py --gt bqa-evaluation/gt_subtypes.csv --pred_glob "bqa_result/syringe/pred_syringe.csv" --iou 0.3 --out bqa-evaluation/eval_out
+# python tools/eval_ap.py --gt bqa-evaluation/gt_subtypes.csv --pred_list bqa_result/knife/pred_knife.csv bqa_result/nail/pred_nail.csv bqa_result/syringe/pred_syringe.csv 'bqa_result/test tube/pred_test tube.csv' --iou 0.3 --out bqa-evaluation/eval_out
+# python tools/eval_ap.py --gt bqa-evaluation/gt_subtypes.csv --pred_list bqa_result/knife/pred_knife.csv bqa_result/nail/pred_nail.csv bqa_result/syringe/pred_syringe.csv 'bqa_result/test tube/pred_test tube.csv' --iou 0.5 --out bqa-evaluation/eval_out
+# python tools\eval_ap.py --gt bqa-evaluation\gt_subtypes.csv --pred_list bqa_result\owlvit\pred_knife.csv bqa_result\owlvit\pred_nail.csv bqa_result\owlvit\pred_syringe.csv bqa_result\owlvit\pred_test_tube.csv --iou 0.5 --out bqa-evaluation\eval_out_owlvit

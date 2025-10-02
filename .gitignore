@@ -29,34 +29,25 @@ runs.zip
 ultralytics.zip
 
 
-bqa-evaluation (2).zip
-bqa-evaluation.zip
-bqa-evaluation/
-bqa/bqa_result_blade/
-bqa/bqa_result_glove/
-bqa/bqa_result_knife/
-bqa/bqa_result_mask/
-bqa/bqa_result_medicine package/
-bqa/bqa_result_nail/
-bqa/bqa_result_scissors/
-bqa/bqa_result_screw/
-bqa/bqa_result_syringe/
-bqa/bqa_result_test tube/
-        bqa/bqa_test/
-        bqa/test_images/
-        bqa_crops_day1.zip
-        bqa_crops_day1/
-        bqa_predictions.zip
-        bqa_predictions/
-        bqa_result/
-        dataset-refined-v3/
-        dataset-refined-v4/
-        dataset-refined-v5/
-        repo_structure.txt
-        sahi_outputs/
-        test-mAP35/
-        test_commands.txt
-        test_runs/
+another_test.py
+bqa full.zip
+bqa full/
+bqa/bqa_test/
+bqa/test_images/
+bqa_crops_day1.zip
+bqa_crops_day1/
+bqa_predictions.zip
+bqa_predictions/
+bqa_result/
+dataset-refined-v3/
+dataset-refined-v4/
+dataset-refined-v5/
+repo_structure.txt
+sahi_outputs/
+test-mAP35/
+test_commands.txt
+test_runs/
+val_compare.csv
 
 
 
